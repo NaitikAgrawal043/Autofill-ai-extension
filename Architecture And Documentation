@@ -1,0 +1,1657 @@
+# 🚀 AutoFill AI — Chrome Extension Architecture & Documentation
+
+> **An AI-powered Chrome extension that intelligently auto-fills internship & placement application forms.**
+
+---
+
+## Table of Contents
+
+1. [Project Overview](#1-project-overview)
+2. [Complete Tech Stack](#2-complete-tech-stack)
+3. [System Architecture](#3-system-architecture)
+4. [Data Flow](#4-data-flow)
+5. [Project Structure](#5-project-structure)
+6. [Phase-by-Phase Implementation Guide](#6-phase-by-phase-implementation-guide)
+7. [API Design](#7-api-design)
+8. [Database Schema](#8-database-schema)
+9. [AI Prompt Engineering](#9-ai-prompt-engineering)
+10. [Security & Privacy](#10-security--privacy)
+11. [Edge Cases & Error Handling](#11-edge-cases--error-handling)
+12. [Testing Strategy](#12-testing-strategy)
+13. [Deployment & Distribution](#13-deployment--distribution)
+
+---
+
+## 1. Project Overview
+
+### Problem Statement
+Students applying for internships/placements waste hours filling out the same personal details across dozens of career portals. Each portal has a slightly different form layout, field naming, and structure — making simple copy-paste insufficient.
+
+### Solution
+**AutoFill AI** is a Chrome extension that:
+1. Lets users create a **master profile** once (name, education, skills, experience, resume, etc.)
+2. **Detects** form fields on any career/job portal page
+3. Uses **AI (Gemini API)** to intelligently match user profile data to form fields — even when labels are ambiguous or non-standard
+4. **Auto-fills** the form in one click
+5. **Asks the user** for any field it can't confidently fill (unseen/unknown questions)
+
+### Key Differentiators
+- Works on **any** career portal (not hard-coded to specific sites)
+- Uses **AI-driven semantic matching** — not brittle regex/keyword matching
+- Handles **dropdowns, textareas, radio buttons, checkboxes** — not just text inputs
+- **Learns** from user corrections over time (optional enhancement)
+
+---
+
+## 2. Complete Tech Stack
+
+### Frontend (Chrome Extension)
+
+| Technology | Purpose | Why This Choice |
+|---|---|---|
+| **React 18+** | Extension Popup & Options Page UI | Component-based, great DX, rich ecosystem |
+| **TypeScript** | Type safety across the entire extension | Catches bugs early, better IDE support |
+| **Vite** | Build tool / bundler | Blazing fast HMR, native ES modules |
+| **CRXJS Vite Plugin** | Chrome Extension build integration | Reads `manifest.json`, auto-generates valid extension structure |
+| **Vanilla CSS / CSS Modules** | Styling | Scoped styles, no runtime overhead in content scripts |
+| **Chrome APIs** | Storage, messaging, tabs | Native extension capabilities |
+
+### Content Script (Injected into Web Pages)
+
+| Technology | Purpose | Why This Choice |
+|---|---|---|
+| **Vanilla TypeScript** | DOM scraping & form filling | React is too heavy to inject into every page; pure TS is lightweight |
+| **MutationObserver API** | Detect dynamically loaded forms (SPAs) | Many career portals use React/Angular — forms load asynchronously |
+
+### Background Script (Service Worker)
+
+| Technology | Purpose | Why This Choice |
+|---|---|---|
+| **TypeScript** | Message routing, API calls, storage management | Consistent type safety with the rest of the codebase |
+| **Chrome Extension Service Worker API** | Event-driven background processing | Required by Manifest V3 |
+
+### Backend Server
+
+| Technology | Purpose | Why This Choice |
+|---|---|---|
+| **Node.js 20+** | Server runtime | JS everywhere, non-blocking I/O |
+| **Express.js** | REST API framework | Minimal, flexible, well-documented |
+| **TypeScript** | Type safety | Consistent with frontend |
+| **Google Gemini API** | AI-powered field matching & answer generation | Powerful, cost-effective, good at structured output |
+| **MongoDB** | (Optional) Store user profiles server-side, analytics | Flexible schema for varied user data |
+| **Redis** | (Optional) Cache AI responses for common field patterns | Reduces API costs and latency |
+| **Helmet + CORS + Rate Limiting** | Security middleware | Production-grade API security |
+
+### DevOps & Tooling
+
+| Tool | Purpose |
+|---|---|
+| **ESLint + Prettier** | Code quality & formatting |
+| **Vitest** | Unit testing (Vite-native) |
+| **Playwright** | E2E testing for extension |
+| **pnpm** | Fast, disk-efficient package manager |
+| **dotenv** | Environment variable management |
+| **GitHub Actions** | CI/CD pipeline |
+
+---
+
+## 3. System Architecture
+
+```mermaid
+graph TB
+    subgraph "Chrome Browser"
+        subgraph "Extension Context"
+            A["🖱️ Extension Popup<br/>(React + TS)"]
+            B["⚙️ Options Page<br/>(React + TS)<br/>Master Profile Dashboard"]
+            C["🔧 Background Script<br/>(Service Worker / TS)"]
+        end
+        subgraph "Web Page Context"
+            D["📄 Content Script<br/>(Vanilla TS)<br/>DOM Scraper + Filler"]
+            E["🌐 Career Portal<br/>Web Page DOM"]
+        end
+    end
+
+    subgraph "Backend Server"
+        F["🖥️ Node.js + Express<br/>API Server"]
+        G["🤖 Gemini AI API"]
+        H["🗄️ MongoDB<br/>(Optional)"]
+        I["⚡ Redis Cache<br/>(Optional)"]
+    end
+
+    A -->|"Toggle Autofill<br/>View Status"| C
+    B -->|"Save Profile to<br/>chrome.storage.local"| C
+    D <-->|"chrome.runtime<br/>.sendMessage()"| C
+    D <-->|"Read & Write DOM"| E
+    C <-->|"HTTPS POST<br/>/api/match-fields"| F
+    F <-->|"AI Prompt &<br/>Response"| G
+    F <-->|"Read/Write<br/>User Data"| H
+    F <-->|"Cache Lookups"| I
+
+    style A fill:#4F46E5,color:#fff
+    style B fill:#4F46E5,color:#fff
+    style C fill:#F59E0B,color:#000
+    style D fill:#10B981,color:#fff
+    style E fill:#6B7280,color:#fff
+    style F fill:#EF4444,color:#fff
+    style G fill:#8B5CF6,color:#fff
+    style H fill:#059669,color:#fff
+    style I fill:#DC2626,color:#fff
+```
+
+### Component Responsibilities
+
+| Component | Runs In | Responsibility |
+|---|---|---|
+| **Extension Popup** | Extension popup window | Quick actions: trigger autofill, view status, see matched fields |
+| **Options Page** | Dedicated browser tab | Full master profile editor, resume upload, settings, field history |
+| **Content Script** | Every matched web page | Scrape form fields (labels, types, options), inject values, trigger DOM events |
+| **Background Script** | Extension service worker | Central hub: routes messages, calls backend API, manages `chrome.storage` |
+| **Backend API** | Your server (or cloud) | Receives form fields + user profile → calls AI → returns mapped values |
+| **Gemini AI** | Google Cloud | Semantic field matching, answer generation for open-ended questions |
+
+---
+
+## 4. Data Flow
+
+### 4.1 Complete Autofill Flow
+
+```mermaid
+sequenceDiagram
+    participant U as 👤 User
+    participant P as 🖱️ Popup UI
+    participant CS as 📄 Content Script
+    participant BG as 🔧 Background Script
+    participant API as 🖥️ Backend API
+    participant AI as 🤖 Gemini AI
+
+    U->>P: Clicks "AutoFill This Page"
+    P->>BG: chrome.runtime.sendMessage({action: "START_AUTOFILL"})
+    BG->>CS: chrome.tabs.sendMessage({action: "SCRAPE_FIELDS"})
+
+    Note over CS: Scans DOM for all<br/>input, select, textarea,<br/>radio, checkbox elements
+
+    CS->>BG: Returns FormField[] array
+    
+    Note over BG: Reads user profile from<br/>chrome.storage.local
+
+    BG->>API: POST /api/match-fields<br/>{profile, fields}
+    API->>AI: Construct prompt with<br/>profile + field labels
+    AI->>API: Returns matched JSON
+    API->>BG: Returns FieldMapping[]
+
+    Note over BG: Separates matched<br/>vs unmatched fields
+
+    BG->>CS: {matched: [...], unmatched: [...]}
+
+    Note over CS: Fills matched fields,<br/>triggers input/change events
+
+    CS->>BG: Reports fill results
+    BG->>P: Updates UI with status
+
+    alt Has Unmatched Fields
+        P->>U: Shows unmatched fields dialog
+        U->>P: Provides answers
+        P->>BG: Sends user answers
+        BG->>CS: Fills remaining fields
+    end
+```
+
+### 4.2 Form Field Extraction Detail
+
+```mermaid
+flowchart LR
+    A["🔍 Step 1<br/>Query all form elements"] --> B["🏷️ Step 2<br/>Extract labels via:<br/>• associated &lt;label&gt;<br/>• aria-label<br/>• placeholder<br/>• parent text<br/>• name attribute"]
+    B --> C["📋 Step 3<br/>Determine field type:<br/>• text / email / tel<br/>• select (get options)<br/>• radio (get choices)<br/>• checkbox<br/>• textarea<br/>• file (resume upload)"]
+    C --> D["📦 Step 4<br/>Build FormField object<br/>with unique selector"]
+```
+
+### 4.3 Data Model: FormField
+
+```typescript
+interface FormField {
+  // Unique CSS selector to re-find this element
+  selector: string;
+  
+  // Human-readable label extracted from the page
+  label: string;
+  
+  // HTML input type
+  type: 'text' | 'email' | 'tel' | 'number' | 'date' | 'select' | 
+        'radio' | 'checkbox' | 'textarea' | 'file' | 'url' | 'hidden';
+  
+  // For select/radio/checkbox: available options
+  options?: string[];
+  
+  // Current value (if pre-filled)
+  currentValue?: string;
+  
+  // Whether the field is required
+  required: boolean;
+  
+  // Contextual hints (nearby text, section heading, etc.)
+  context?: string;
+  
+  // The placeholder text if any
+  placeholder?: string;
+}
+```
+
+---
+
+## 5. Project Structure
+
+```
+autofill-ai/
+├── extension/                      # Chrome Extension (Frontend)
+│   ├── public/
+│   │   ├── icons/
+│   │   │   ├── icon-16.png
+│   │   │   ├── icon-32.png
+│   │   │   ├── icon-48.png
+│   │   │   └── icon-128.png
+│   │   └── manifest.json           # Chrome Extension Manifest V3
+│   ├── src/
+│   │   ├── popup/                   # Extension Popup (React)
+│   │   │   ├── Popup.tsx
+│   │   │   ├── Popup.css
+│   │   │   ├── components/
+│   │   │   │   ├── AutofillButton.tsx
+│   │   │   │   ├── StatusIndicator.tsx
+│   │   │   │   ├── FieldPreview.tsx
+│   │   │   │   └── UnmatchedFieldsDialog.tsx
+│   │   │   └── index.tsx            # Popup entry point
+│   │   ├── options/                 # Options Page (React)
+│   │   │   ├── Options.tsx
+│   │   │   ├── Options.css
+│   │   │   ├── components/
+│   │   │   │   ├── ProfileForm.tsx
+│   │   │   │   ├── ResumeUpload.tsx
+│   │   │   │   ├── EducationSection.tsx
+│   │   │   │   ├── ExperienceSection.tsx
+│   │   │   │   ├── SkillsSection.tsx
+│   │   │   │   ├── CustomFieldsManager.tsx
+│   │   │   │   └── SettingsPanel.tsx
+│   │   │   └── index.tsx            # Options page entry point
+│   │   ├── content/                 # Content Script (Vanilla TS)
+│   │   │   ├── index.ts             # Content script entry point
+│   │   │   ├── scraper.ts           # DOM field extraction logic
+│   │   │   ├── filler.ts            # DOM value injection logic
+│   │   │   ├── detector.ts          # Form detection & MutationObserver
+│   │   │   ├── events.ts            # Trigger native DOM events
+│   │   │   └── selectors.ts         # CSS selector generation utilities
+│   │   ├── background/              # Background Service Worker
+│   │   │   ├── index.ts             # Service worker entry point
+│   │   │   ├── messageHandler.ts    # Chrome message routing
+│   │   │   ├── apiClient.ts         # Backend API communication
+│   │   │   └── storageManager.ts    # chrome.storage utilities
+│   │   ├── shared/                  # Shared types & utilities
+│   │   │   ├── types.ts             # FormField, UserProfile, etc.
+│   │   │   ├── constants.ts         # Message types, API URLs
+│   │   │   ├── messages.ts          # Type-safe message definitions
+│   │   │   └── validators.ts        # Input validation helpers
+│   │   └── assets/                  # Static assets (images, fonts)
+│   ├── vite.config.ts               # Vite + CRXJS configuration
+│   ├── tsconfig.json
+│   ├── package.json
+│   └── .env                         # VITE_API_URL=http://localhost:3001
+│
+├── server/                          # Backend API (Node.js)
+│   ├── src/
+│   │   ├── index.ts                 # Express server entry point
+│   │   ├── config/
+│   │   │   ├── env.ts               # Environment variable validation
+│   │   │   └── cors.ts              # CORS configuration
+│   │   ├── routes/
+│   │   │   ├── matchFields.ts       # POST /api/match-fields
+│   │   │   ├── health.ts            # GET /api/health
+│   │   │   └── feedback.ts          # POST /api/feedback (learning)
+│   │   ├── services/
+│   │   │   ├── aiService.ts         # Gemini API integration
+│   │   │   ├── matchingService.ts   # Field-to-profile matching logic
+│   │   │   ├── cacheService.ts      # Redis caching layer
+│   │   │   └── profileService.ts    # Profile normalization
+│   │   ├── middleware/
+│   │   │   ├── rateLimiter.ts       # Rate limiting (prevent abuse)
+│   │   │   ├── auth.ts              # API key / token validation
+│   │   │   ├── errorHandler.ts      # Global error handler
+│   │   │   └── logger.ts            # Request logging
+│   │   ├── prompts/
+│   │   │   ├── matchFields.ts       # AI prompt templates
+│   │   │   └── generateAnswer.ts    # Prompt for open-ended questions
+│   │   └── utils/
+│   │       ├── responseParser.ts    # Parse & validate AI JSON responses
+│   │       └── sanitizer.ts         # Input sanitization
+│   ├── tsconfig.json
+│   ├── package.json
+│   ├── .env                         # GEMINI_API_KEY, MONGO_URI, etc.
+│   └── nodemon.json
+│
+├── docs/                            # Documentation
+│   ├── SETUP.md
+│   ├── API.md
+│   └── CONTRIBUTING.md
+│
+├── .github/
+│   └── workflows/
+│       └── ci.yml                   # GitHub Actions CI pipeline
+│
+├── .gitignore
+├── README.md
+└── pnpm-workspace.yaml             # Monorepo workspace config
+```
+
+---
+
+## 6. Phase-by-Phase Implementation Guide
+
+### Phase 1: Project Scaffolding & Extension Shell
+
+> [!IMPORTANT]
+> This phase sets up the entire monorepo and ensures the extension loads in Chrome.
+
+#### Step 1.1 — Initialize the Monorepo
+
+```bash
+# Create root project folder
+mkdir autofill-ai && cd autofill-ai
+
+# Initialize pnpm workspace
+pnpm init
+```
+
+Create `pnpm-workspace.yaml`:
+```yaml
+packages:
+  - 'extension'
+  - 'server'
+```
+
+#### Step 1.2 — Scaffold the Extension with Vite + CRXJS
+
+```bash
+# Create the extension package
+cd extension
+pnpm create vite . --template react-ts
+
+# Install CRXJS plugin
+pnpm add -D @crxjs/vite-plugin@latest
+
+# Install Chrome types
+pnpm add -D @types/chrome
+```
+
+#### Step 1.3 — Create `manifest.json` (Manifest V3)
+
+```json
+{
+  "manifest_version": 3,
+  "name": "AutoFill AI",
+  "version": "1.0.0",
+  "description": "AI-powered form auto-filler for internship & placement applications",
+  "permissions": [
+    "storage",
+    "activeTab",
+    "scripting"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "action": {
+    "default_popup": "src/popup/index.html",
+    "default_icon": {
+      "16": "icons/icon-16.png",
+      "32": "icons/icon-32.png",
+      "48": "icons/icon-48.png",
+      "128": "icons/icon-128.png"
+    }
+  },
+  "options_page": "src/options/index.html",
+  "background": {
+    "service_worker": "src/background/index.ts",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["src/content/index.ts"],
+      "run_at": "document_idle"
+    }
+  ],
+  "icons": {
+    "16": "icons/icon-16.png",
+    "48": "icons/icon-48.png",
+    "128": "icons/icon-128.png"
+  }
+}
+```
+
+#### Step 1.4 — Configure Vite for CRXJS
+
+```typescript
+// vite.config.ts
+import { defineConfig } from 'vite';
+import react from '@vitejs/plugin-react';
+import { crx } from '@crxjs/vite-plugin';
+import manifest from './public/manifest.json';
+
+export default defineConfig({
+  plugins: [
+    react(),
+    crx({ manifest }),
+  ],
+  server: {
+    port: 5173,
+    strictPort: true,
+    hmr: {
+      port: 5173,
+    },
+  },
+});
+```
+
+#### Step 1.5 — Load the Extension in Chrome
+
+```bash
+pnpm dev
+```
+
+1. Open `chrome://extensions/`
+2. Enable **Developer Mode**
+3. Click **Load Unpacked**
+4. Select the `extension/dist` folder
+5. You should see the extension icon — clicking it opens the React popup
+
+---
+
+### Phase 2: Master Profile System (Options Page)
+
+> [!NOTE]
+> This is the heart of the user experience. A well-designed profile page ensures high-quality autofills.
+
+#### Step 2.1 — Define the UserProfile Type
+
+```typescript
+// src/shared/types.ts
+
+export interface UserProfile {
+  // Personal
+  firstName: string;
+  lastName: string;
+  fullName: string;
+  email: string;
+  phone: string;
+  dateOfBirth: string;          // ISO format
+  gender: string;
+  nationality: string;
+  currentCity: string;
+  currentState: string;
+  country: string;
+  pincode: string;
+  address: string;
+
+  // Online Presence
+  linkedinUrl: string;
+  githubUrl: string;
+  portfolioUrl: string;
+  twitterUrl: string;
+
+  // Education
+  education: Education[];
+
+  // Experience
+  experience: Experience[];
+
+  // Skills
+  technicalSkills: string[];
+  softSkills: string[];
+  languages: Language[];
+
+  // Documents
+  resumeText: string;           // Parsed text from resume
+  coverLetterTemplate: string;
+
+  // Academic
+  cgpa: string;
+  percentage: string;
+  backlogs: string;
+  yearOfPassing: string;
+
+  // Professional
+  currentCTC: string;
+  expectedCTC: string;
+  noticePeriod: string;
+  yearsOfExperience: string;
+  preferredRole: string;
+  preferredLocation: string[];
+
+  // Custom fields (user-defined key-value pairs)
+  customFields: Record<string, string>;
+
+  // Metadata
+  lastUpdated: string;
+  version: number;
+}
+
+export interface Education {
+  degree: string;               // "B.Tech", "M.Sc", etc.
+  field: string;                // "Computer Science"
+  institution: string;
+  university: string;
+  startYear: string;
+  endYear: string;
+  grade: string;                // CGPA or percentage
+  gradeType: 'cgpa' | 'percentage';
+}
+
+export interface Experience {
+  title: string;
+  company: string;
+  location: string;
+  type: 'full-time' | 'part-time' | 'internship' | 'freelance';
+  startDate: string;
+  endDate: string;
+  current: boolean;
+  description: string;
+  skills: string[];
+}
+
+export interface Language {
+  name: string;
+  proficiency: 'native' | 'fluent' | 'intermediate' | 'beginner';
+}
+```
+
+#### Step 2.2 — Build the Options Page UI
+
+The Options page should be a **multi-section dashboard** with:
+
+| Section | Fields |
+|---|---|
+| **Personal Info** | Name, email, phone, DOB, gender, address |
+| **Education** | Degree, institution, year, CGPA (repeatable) |
+| **Experience** | Company, role, duration, description (repeatable) |
+| **Skills** | Technical skills (tag input), soft skills, languages |
+| **Online Profiles** | LinkedIn, GitHub, Portfolio URLs |
+| **Resume** | Upload PDF → extract text (use `pdf.js` or paste raw text) |
+| **Custom Fields** | User-defined Q&A pairs for frequently asked questions |
+| **Settings** | API URL, auto-detect forms toggle, theme |
+
+#### Step 2.3 — Save to chrome.storage.local
+
+```typescript
+// src/background/storageManager.ts
+
+export async function saveProfile(profile: UserProfile): Promise<void> {
+  await chrome.storage.local.set({ userProfile: profile });
+}
+
+export async function getProfile(): Promise<UserProfile | null> {
+  const result = await chrome.storage.local.get('userProfile');
+  return result.userProfile || null;
+}
+
+export async function saveCustomAnswer(
+  fieldLabel: string, 
+  answer: string
+): Promise<void> {
+  const { customAnswers = {} } = await chrome.storage.local.get('customAnswers');
+  customAnswers[fieldLabel.toLowerCase().trim()] = answer;
+  await chrome.storage.local.set({ customAnswers });
+}
+```
+
+---
+
+### Phase 3: Content Script — DOM Scraping Engine
+
+> [!WARNING]
+> This is the most fragile part of the extension. Career portals use wildly different HTML structures. Your scraper must be resilient.
+
+#### Step 3.1 — Field Scraper Implementation
+
+```typescript
+// src/content/scraper.ts
+
+import { FormField } from '../shared/types';
+
+export function scrapeFormFields(): FormField[] {
+  const fields: FormField[] = [];
+  
+  // Query all interactive form elements
+  const inputs = document.querySelectorAll<HTMLInputElement>(
+    'input:not([type="hidden"]):not([type="submit"]):not([type="button"])'
+  );
+  const textareas = document.querySelectorAll<HTMLTextAreaElement>('textarea');
+  const selects = document.querySelectorAll<HTMLSelectElement>('select');
+
+  inputs.forEach((input) => {
+    const field = extractFieldInfo(input);
+    if (field) fields.push(field);
+  });
+
+  textareas.forEach((textarea) => {
+    const field = extractFieldInfo(textarea);
+    if (field) fields.push(field);
+  });
+
+  selects.forEach((select) => {
+    const field = extractFieldInfo(select);
+    if (field) {
+      field.type = 'select';
+      field.options = Array.from(select.options).map(o => o.text.trim()).filter(Boolean);
+      fields.push(field);
+    }
+  });
+
+  return fields;
+}
+
+function extractFieldInfo(
+  element: HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement
+): FormField | null {
+  const label = getLabel(element);
+  if (!label) return null;  // Skip unlabeled fields
+
+  return {
+    selector: generateUniqueSelector(element),
+    label,
+    type: element instanceof HTMLSelectElement 
+      ? 'select' 
+      : (element as HTMLInputElement).type as FormField['type'] || 'text',
+    currentValue: element.value,
+    required: element.required || element.getAttribute('aria-required') === 'true',
+    placeholder: element.placeholder || undefined,
+    context: getFieldContext(element),
+  };
+}
+
+function getLabel(element: HTMLElement): string {
+  // Strategy 1: Associated <label> element
+  const id = element.id;
+  if (id) {
+    const label = document.querySelector(`label[for="${id}"]`);
+    if (label?.textContent) return label.textContent.trim();
+  }
+
+  // Strategy 2: aria-label
+  const ariaLabel = element.getAttribute('aria-label');
+  if (ariaLabel) return ariaLabel.trim();
+
+  // Strategy 3: aria-labelledby
+  const labelledBy = element.getAttribute('aria-labelledby');
+  if (labelledBy) {
+    const refEl = document.getElementById(labelledBy);
+    if (refEl?.textContent) return refEl.textContent.trim();
+  }
+
+  // Strategy 4: Wrapping <label>
+  const parentLabel = element.closest('label');
+  if (parentLabel?.textContent) {
+    return parentLabel.textContent.replace(element.textContent || '', '').trim();
+  }
+
+  // Strategy 5: Placeholder text
+  if ((element as HTMLInputElement).placeholder) {
+    return (element as HTMLInputElement).placeholder.trim();
+  }
+
+  // Strategy 6: Name attribute (fallback)
+  const name = element.getAttribute('name');
+  if (name) return name.replace(/[_\-]/g, ' ').trim();
+
+  // Strategy 7: Previous sibling text
+  const prev = element.previousElementSibling;
+  if (prev?.textContent && prev.tagName !== 'INPUT') {
+    return prev.textContent.trim();
+  }
+
+  return '';
+}
+
+function getFieldContext(element: HTMLElement): string {
+  // Get the nearest section heading or fieldset legend
+  const fieldset = element.closest('fieldset');
+  const legend = fieldset?.querySelector('legend');
+  
+  const section = element.closest('section, [role="group"], .form-section');
+  const heading = section?.querySelector('h1, h2, h3, h4, h5, h6');
+
+  const parts: string[] = [];
+  if (legend?.textContent) parts.push(`Section: ${legend.textContent.trim()}`);
+  if (heading?.textContent) parts.push(`Heading: ${heading.textContent.trim()}`);
+
+  return parts.join(' | ');
+}
+
+function generateUniqueSelector(element: HTMLElement): string {
+  // Priority: id > name > data-testid > computed path
+  if (element.id) return `#${CSS.escape(element.id)}`;
+  
+  const name = element.getAttribute('name');
+  const tag = element.tagName.toLowerCase();
+  if (name) return `${tag}[name="${CSS.escape(name)}"]`;
+
+  const testId = element.getAttribute('data-testid');
+  if (testId) return `[data-testid="${CSS.escape(testId)}"]`;
+
+  // Fallback: build a path-based selector
+  return buildPathSelector(element);
+}
+
+function buildPathSelector(element: HTMLElement): string {
+  const path: string[] = [];
+  let current: HTMLElement | null = element;
+
+  while (current && current !== document.body) {
+    let selector = current.tagName.toLowerCase();
+    if (current.id) {
+      selector = `#${CSS.escape(current.id)}`;
+      path.unshift(selector);
+      break;
+    }
+    const parent = current.parentElement;
+    if (parent) {
+      const siblings = Array.from(parent.children).filter(
+        c => c.tagName === current!.tagName
+      );
+      if (siblings.length > 1) {
+        const index = siblings.indexOf(current) + 1;
+        selector += `:nth-of-type(${index})`;
+      }
+    }
+    path.unshift(selector);
+    current = current.parentElement;
+  }
+
+  return path.join(' > ');
+}
+```
+
+#### Step 3.2 — Form Filler Implementation
+
+```typescript
+// src/content/filler.ts
+
+import { FieldMapping } from '../shared/types';
+
+export function fillFields(mappings: FieldMapping[]): FillResult[] {
+  const results: FillResult[] = [];
+
+  for (const mapping of mappings) {
+    try {
+      const element = document.querySelector(mapping.selector);
+      if (!element) {
+        results.push({ selector: mapping.selector, success: false, error: 'Element not found' });
+        continue;
+      }
+
+      fillSingleField(element as HTMLElement, mapping);
+      results.push({ selector: mapping.selector, success: true });
+    } catch (error) {
+      results.push({ 
+        selector: mapping.selector, 
+        success: false, 
+        error: (error as Error).message 
+      });
+    }
+  }
+
+  return results;
+}
+
+function fillSingleField(element: HTMLElement, mapping: FieldMapping): void {
+  const { value, type } = mapping;
+
+  switch (type) {
+    case 'select':
+      fillSelect(element as HTMLSelectElement, value);
+      break;
+    case 'radio':
+      fillRadio(element as HTMLInputElement, value);
+      break;
+    case 'checkbox':
+      fillCheckbox(element as HTMLInputElement, value);
+      break;
+    case 'date':
+      fillDate(element as HTMLInputElement, value);
+      break;
+    case 'file':
+      // Cannot programmatically set file inputs for security reasons
+      // Highlight the field and notify the user
+      highlightField(element, 'Please manually upload your file');
+      break;
+    default:
+      fillTextInput(element as HTMLInputElement | HTMLTextAreaElement, value);
+  }
+}
+
+function fillTextInput(
+  element: HTMLInputElement | HTMLTextAreaElement, 
+  value: string
+): void {
+  // Use native input value setter to bypass React/Angular's synthetic events
+  const nativeInputValueSetter = Object.getOwnPropertyDescriptor(
+    window.HTMLInputElement.prototype, 'value'
+  )?.set;
+  
+  const nativeTextAreaValueSetter = Object.getOwnPropertyDescriptor(
+    window.HTMLTextAreaElement.prototype, 'value'
+  )?.set;
+
+  const setter = element instanceof HTMLTextAreaElement 
+    ? nativeTextAreaValueSetter 
+    : nativeInputValueSetter;
+
+  if (setter) {
+    setter.call(element, value);
+  } else {
+    element.value = value;
+  }
+
+  // Trigger all possible events that frameworks might listen to
+  triggerEvents(element);
+}
+
+function fillSelect(element: HTMLSelectElement, value: string): void {
+  const options = Array.from(element.options);
+  
+  // Try exact match first
+  let match = options.find(o => 
+    o.value.toLowerCase() === value.toLowerCase() || 
+    o.text.toLowerCase() === value.toLowerCase()
+  );
+
+  // Try partial/fuzzy match
+  if (!match) {
+    match = options.find(o => 
+      o.text.toLowerCase().includes(value.toLowerCase()) ||
+      value.toLowerCase().includes(o.text.toLowerCase())
+    );
+  }
+
+  if (match) {
+    element.value = match.value;
+    triggerEvents(element);
+  }
+}
+
+function fillRadio(element: HTMLInputElement, value: string): void {
+  const name = element.name;
+  const radios = document.querySelectorAll<HTMLInputElement>(
+    `input[type="radio"][name="${name}"]`
+  );
+  
+  for (const radio of radios) {
+    const label = getRadioLabel(radio);
+    if (label.toLowerCase().includes(value.toLowerCase()) ||
+        radio.value.toLowerCase() === value.toLowerCase()) {
+      radio.checked = true;
+      triggerEvents(radio);
+      break;
+    }
+  }
+}
+
+function fillCheckbox(element: HTMLInputElement, value: string): void {
+  const shouldCheck = ['true', 'yes', '1', 'on'].includes(value.toLowerCase());
+  if (element.checked !== shouldCheck) {
+    element.click();
+  }
+}
+
+function fillDate(element: HTMLInputElement, value: string): void {
+  // Attempt to parse and format the date to match the input's expected format
+  const date = new Date(value);
+  if (!isNaN(date.getTime())) {
+    const formatted = date.toISOString().split('T')[0]; // YYYY-MM-DD
+    element.value = formatted;
+    triggerEvents(element);
+  }
+}
+
+function triggerEvents(element: HTMLElement): void {
+  // Dispatch events in the correct order that frameworks expect
+  element.dispatchEvent(new Event('focus', { bubbles: true }));
+  element.dispatchEvent(new Event('input', { bubbles: true }));
+  element.dispatchEvent(new Event('change', { bubbles: true }));
+  element.dispatchEvent(new Event('blur', { bubbles: true }));
+  
+  // React-specific: React 16+ uses a different event system
+  element.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
+}
+
+function getRadioLabel(radio: HTMLInputElement): string {
+  const label = document.querySelector(`label[for="${radio.id}"]`);
+  if (label) return label.textContent?.trim() || '';
+  const parent = radio.closest('label');
+  return parent?.textContent?.trim() || radio.value;
+}
+
+function highlightField(element: HTMLElement, message: string): void {
+  element.style.outline = '3px solid #F59E0B';
+  element.style.outlineOffset = '2px';
+  element.title = message;
+}
+
+interface FillResult {
+  selector: string;
+  success: boolean;
+  error?: string;
+}
+```
+
+#### Step 3.3 — Dynamic Form Detection
+
+```typescript
+// src/content/detector.ts
+
+export function observeFormChanges(callback: () => void): MutationObserver {
+  const observer = new MutationObserver((mutations) => {
+    const hasNewForms = mutations.some(mutation => {
+      return Array.from(mutation.addedNodes).some(node => {
+        if (node instanceof HTMLElement) {
+          return node.querySelector('form, input, select, textarea') !== null ||
+                 node.matches('form, input, select, textarea');
+        }
+        return false;
+      });
+    });
+
+    if (hasNewForms) {
+      // Debounce: wait for the DOM to settle
+      setTimeout(callback, 500);
+    }
+  });
+
+  observer.observe(document.body, {
+    childList: true,
+    subtree: true,
+  });
+
+  return observer;
+}
+```
+
+---
+
+### Phase 4: Background Script — The Central Hub
+
+```typescript
+// src/background/index.ts
+
+import { MessageType, Message } from '../shared/messages';
+import { getProfile } from './storageManager';
+import { callMatchFieldsAPI } from './apiClient';
+
+// Listen for messages from popup and content scripts
+chrome.runtime.onMessage.addListener((message: Message, sender, sendResponse) => {
+  handleMessage(message, sender).then(sendResponse);
+  return true; // Keep the channel open for async response
+});
+
+async function handleMessage(message: Message, sender: chrome.runtime.MessageSender) {
+  switch (message.type) {
+    case MessageType.START_AUTOFILL: {
+      // Step 1: Tell the content script to scrape form fields
+      const tab = await getActiveTab();
+      if (!tab?.id) return { success: false, error: 'No active tab' };
+
+      const fields = await chrome.tabs.sendMessage(tab.id, {
+        type: MessageType.SCRAPE_FIELDS,
+      });
+
+      if (!fields?.length) {
+        return { success: false, error: 'No form fields detected on this page' };
+      }
+
+      // Step 2: Get user profile
+      const profile = await getProfile();
+      if (!profile) {
+        return { success: false, error: 'No profile found. Please set up your profile first.' };
+      }
+
+      // Step 3: Call the backend for AI matching
+      const customAnswers = await getCustomAnswers();
+      const matchResult = await callMatchFieldsAPI(profile, fields, customAnswers);
+
+      // Step 4: Send matched fields back to content script for filling
+      const fillResult = await chrome.tabs.sendMessage(tab.id, {
+        type: MessageType.FILL_FIELDS,
+        data: matchResult.matched,
+      });
+
+      return {
+        success: true,
+        filled: fillResult,
+        unmatched: matchResult.unmatched,
+        totalFields: fields.length,
+      };
+    }
+
+    case MessageType.SAVE_CUSTOM_ANSWER: {
+      const { label, answer } = message.data;
+      await saveCustomAnswer(label, answer);
+      return { success: true };
+    }
+
+    default:
+      return { success: false, error: 'Unknown message type' };
+  }
+}
+
+async function getActiveTab(): Promise<chrome.tabs.Tab | undefined> {
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  return tab;
+}
+
+async function getCustomAnswers(): Promise<Record<string, string>> {
+  const result = await chrome.storage.local.get('customAnswers');
+  return result.customAnswers || {};
+}
+```
+
+---
+
+### Phase 5: Backend API Server
+
+#### Step 5.1 — Server Setup
+
+```typescript
+// server/src/index.ts
+
+import express from 'express';
+import cors from 'cors';
+import helmet from 'helmet';
+import rateLimit from 'express-rate-limit';
+import { matchFieldsRouter } from './routes/matchFields';
+import { healthRouter } from './routes/health';
+import { errorHandler } from './middleware/errorHandler';
+import { config } from './config/env';
+
+const app = express();
+
+// Security middleware
+app.use(helmet());
+app.use(cors({
+  origin: [
+    'chrome-extension://*',  // Allow Chrome extension
+  ],
+  methods: ['POST', 'GET'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+}));
+
+// Rate limiting
+app.use(rateLimit({
+  windowMs: 15 * 60 * 1000,  // 15 minutes
+  max: 100,                    // Max 100 requests per window
+  message: { error: 'Too many requests, please try again later' },
+}));
+
+app.use(express.json({ limit: '1mb' }));
+
+// Routes
+app.use('/api', healthRouter);
+app.use('/api', matchFieldsRouter);
+
+// Error handling
+app.use(errorHandler);
+
+app.listen(config.PORT, () => {
+  console.log(`🚀 AutoFill AI server running on port ${config.PORT}`);
+});
+```
+
+#### Step 5.2 — Match Fields Route
+
+```typescript
+// server/src/routes/matchFields.ts
+
+import { Router, Request, Response } from 'express';
+import { matchFieldsWithAI } from '../services/aiService';
+import { validateMatchRequest } from '../utils/sanitizer';
+
+export const matchFieldsRouter = Router();
+
+matchFieldsRouter.post('/match-fields', async (req: Request, res: Response) => {
+  try {
+    const { profile, fields, customAnswers } = validateMatchRequest(req.body);
+
+    const result = await matchFieldsWithAI(profile, fields, customAnswers);
+
+    res.json({
+      success: true,
+      matched: result.matched,
+      unmatched: result.unmatched,
+      confidence: result.overallConfidence,
+    });
+  } catch (error) {
+    console.error('Match fields error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to process field matching',
+    });
+  }
+});
+```
+
+---
+
+## 7. API Design
+
+### `POST /api/match-fields`
+
+#### Request Body
+
+```json
+{
+  "profile": {
+    "firstName": "Naitik",
+    "lastName": "Agrawal",
+    "email": "naitik@example.com",
+    "phone": "+91-9876543210",
+    "education": [
+      {
+        "degree": "B.Tech",
+        "field": "Computer Science",
+        "institution": "IIT Delhi",
+        "endYear": "2026",
+        "grade": "8.5",
+        "gradeType": "cgpa"
+      }
+    ],
+    "technicalSkills": ["React", "TypeScript", "Node.js", "Python"],
+    "linkedinUrl": "https://linkedin.com/in/naitik",
+    "githubUrl": "https://github.com/naitik",
+    "resumeText": "..." 
+  },
+  "fields": [
+    {
+      "selector": "#applicant-name",
+      "label": "Full Name",
+      "type": "text",
+      "required": true,
+      "context": "Section: Personal Details"
+    },
+    {
+      "selector": "select[name='branch']",
+      "label": "Branch / Department",
+      "type": "select",
+      "options": ["CSE", "ECE", "ME", "EE", "CE"],
+      "required": true
+    },
+    {
+      "selector": "#why-join",
+      "label": "Why do you want to join our company?",
+      "type": "textarea",
+      "required": true,
+      "context": "Section: Subjective Questions"
+    }
+  ],
+  "customAnswers": {
+    "why do you want to join": "I am passionate about building scalable systems..."
+  }
+}
+```
+
+#### Response Body
+
+```json
+{
+  "success": true,
+  "matched": [
+    {
+      "selector": "#applicant-name",
+      "value": "Naitik Agrawal",
+      "type": "text",
+      "confidence": 0.98,
+      "source": "profile.fullName"
+    },
+    {
+      "selector": "select[name='branch']",
+      "value": "CSE",
+      "type": "select",
+      "confidence": 0.95,
+      "source": "profile.education[0].field → matched to option"
+    },
+    {
+      "selector": "#why-join",
+      "value": "I am passionate about building scalable systems...",
+      "type": "textarea",
+      "confidence": 0.85,
+      "source": "customAnswers"
+    }
+  ],
+  "unmatched": [
+    {
+      "selector": "#referral-code",
+      "label": "Employee Referral Code (if any)",
+      "type": "text",
+      "reason": "No matching data found in profile"
+    }
+  ],
+  "confidence": 0.92
+}
+```
+
+### `GET /api/health`
+
+```json
+{
+  "status": "ok",
+  "uptime": 3600,
+  "aiProvider": "gemini",
+  "version": "1.0.0"
+}
+```
+
+### `POST /api/feedback`
+
+Used to improve matching over time.
+
+```json
+{
+  "fieldLabel": "Department",
+  "aiSuggestion": "Computer Science",
+  "userCorrection": "CSE",
+  "accepted": false
+}
+```
+
+---
+
+## 8. Database Schema
+
+> [!NOTE]
+> MongoDB is **optional** for MVP. You can start with everything in `chrome.storage.local`. Add MongoDB when you want server-side profile backup, analytics, or multi-device sync.
+
+### Collections
+
+#### `users`
+```json
+{
+  "_id": "ObjectId",
+  "extensionId": "unique-chrome-extension-id",
+  "profile": { /* UserProfile object */ },
+  "createdAt": "ISODate",
+  "updatedAt": "ISODate"
+}
+```
+
+#### `matchLogs` (Analytics & Learning)
+```json
+{
+  "_id": "ObjectId",
+  "userId": "ObjectId",
+  "domain": "careers.google.com",
+  "fieldsCount": 15,
+  "matchedCount": 13,
+  "unmatchedCount": 2,
+  "avgConfidence": 0.91,
+  "corrections": [
+    {
+      "fieldLabel": "Department",
+      "aiSuggestion": "Computer Science", 
+      "userCorrection": "CSE"
+    }
+  ],
+  "timestamp": "ISODate"
+}
+```
+
+#### `fieldPatterns` (Caching Common Patterns)
+```json
+{
+  "_id": "ObjectId",
+  "labelHash": "sha256-of-normalized-label",
+  "label": "Full Name",
+  "profileKey": "fullName",
+  "hitCount": 1542,
+  "lastUsed": "ISODate"
+}
+```
+
+---
+
+## 9. AI Prompt Engineering
+
+### The Master Matching Prompt
+
+```typescript
+// server/src/prompts/matchFields.ts
+
+export function buildMatchPrompt(
+  profile: UserProfile,
+  fields: FormField[],
+  customAnswers: Record<string, string>
+): string {
+  return `
+You are an expert form-filling assistant. Your job is to match a user's profile data 
+to web form fields from a job/internship application.
+
+## USER PROFILE:
+${JSON.stringify(profile, null, 2)}
+
+## CUSTOM ANSWERS (User-provided answers to common questions):
+${JSON.stringify(customAnswers, null, 2)}
+
+## FORM FIELDS TO FILL:
+${JSON.stringify(fields.map(f => ({
+  selector: f.selector,
+  label: f.label,
+  type: f.type,
+  options: f.options,
+  required: f.required,
+  context: f.context,
+  placeholder: f.placeholder,
+})), null, 2)}
+
+## YOUR TASK:
+For each form field, determine the best matching value from the user's profile.
+
+## RULES:
+1. Match fields semantically — "Full Name" matches firstName + lastName concatenated.
+2. For SELECT fields, you MUST pick from the available options list. Choose the closest match.
+3. For RADIO/CHECKBOX fields, match the value to the closest option.
+4. For DATE fields, return dates in YYYY-MM-DD format.
+5. For open-ended TEXTAREA questions (like "Why do you want to join?"), check customAnswers 
+   first. If no custom answer exists, generate a brief, professional response based on 
+   the profile and the question context. Keep generated answers under 200 words.
+6. If you truly cannot determine a value, mark it as unmatched with a reason.
+7. For each match, provide a confidence score from 0.0 to 1.0.
+
+## OUTPUT FORMAT (strict JSON):
+{
+  "matched": [
+    {
+      "selector": "<field's CSS selector>",
+      "value": "<the value to fill>",
+      "type": "<field type>",
+      "confidence": <0.0-1.0>,
+      "source": "<which profile field was used>"
+    }
+  ],
+  "unmatched": [
+    {
+      "selector": "<field's CSS selector>",
+      "label": "<field label>",
+      "type": "<field type>",
+      "reason": "<why it couldn't be matched>"
+    }
+  ]
+}
+
+Return ONLY the JSON object, no markdown formatting, no explanation.
+`;
+}
+```
+
+### AI Service Implementation
+
+```typescript
+// server/src/services/aiService.ts
+
+import { GoogleGenerativeAI } from '@google/generative-ai';
+import { buildMatchPrompt } from '../prompts/matchFields';
+import { config } from '../config/env';
+
+const genAI = new GoogleGenerativeAI(config.GEMINI_API_KEY);
+
+export async function matchFieldsWithAI(
+  profile: UserProfile,
+  fields: FormField[],
+  customAnswers: Record<string, string>
+): Promise<MatchResult> {
+  const model = genAI.getGenerativeModel({ 
+    model: 'gemini-1.5-flash',
+    generationConfig: {
+      temperature: 0.1,        // Low temperature for consistent, factual output
+      topP: 0.95,
+      maxOutputTokens: 4096,
+      responseMimeType: 'application/json',  // Force JSON output
+    },
+  });
+
+  const prompt = buildMatchPrompt(profile, fields, customAnswers);
+
+  const result = await model.generateContent(prompt);
+  const response = result.response;
+  const text = response.text();
+
+  try {
+    const parsed = JSON.parse(text);
+    return {
+      matched: parsed.matched || [],
+      unmatched: parsed.unmatched || [],
+      overallConfidence: calculateOverallConfidence(parsed.matched),
+    };
+  } catch (parseError) {
+    console.error('Failed to parse AI response:', text);
+    throw new Error('AI returned invalid JSON response');
+  }
+}
+
+function calculateOverallConfidence(matched: any[]): number {
+  if (!matched.length) return 0;
+  const sum = matched.reduce((acc, m) => acc + (m.confidence || 0), 0);
+  return Math.round((sum / matched.length) * 100) / 100;
+}
+```
+
+---
+
+## 10. Security & Privacy
+
+> [!CAUTION]
+> This extension handles sensitive personal data. Security is non-negotiable.
+
+### 10.1 Data Storage Security
+
+| Concern | Solution |
+|---|---|
+| User profile stored locally | Use `chrome.storage.local` (sandboxed per extension) |
+| Sensitive fields (DOB, phone) | Never send to backend unless needed for matching |
+| API keys | **Never** store in frontend code. Only on the backend `.env` |
+| Resume text | Strip PII before logging / analytics |
+
+### 10.2 Communication Security
+
+| Concern | Solution |
+|---|---|
+| Extension ↔ Backend | Always HTTPS in production |
+| CORS | Strict `chrome-extension://YOUR_ID` origin only |
+| Rate limiting | 100 req/15min per IP |
+| Request validation | Sanitize & validate all inputs server-side |
+| API authentication | Extension sends a unique `X-Extension-ID` header; backend validates |
+
+### 10.3 Content Script Security
+
+| Concern | Solution |
+|---|---|
+| XSS via injected values | Never inject raw HTML; only set `.value` properties |
+| Selector injection | Sanitize selectors with `CSS.escape()` |
+| Data leakage | Content script only reads DOM — never sends page content to third parties |
+
+### 10.4 Privacy Policy Requirements
+
+If publishing to Chrome Web Store:
+- Declare all data usage in the extension manifest
+- Create a privacy policy page
+- Clearly state that data is stored locally by default
+- Disclose AI API usage and what data is sent to the server
+
+---
+
+## 11. Edge Cases & Error Handling
+
+### Form-Related Edge Cases
+
+| Scenario | Solution |
+|---|---|
+| **Multi-step forms** (wizard-style) | Detect when new fields appear via `MutationObserver`; offer to auto-fill each step |
+| **Shadow DOM** (Web Components) | Use `element.shadowRoot?.querySelectorAll()` as a fallback |
+| **iframes** | Content scripts don't run in cross-origin iframes by default. Add `"all_frames": true` to manifest and handle same-origin iframes |
+| **CAPTCHA fields** | Detect & skip CAPTCHA elements (common class names / `data-sitekey`) |
+| **File upload fields** | Cannot be programmatically filled. Highlight and notify user |
+| **Dynamic dropdowns** (AJAX-loaded options) | Wait for options to load before scraping (`MutationObserver` on the `<select>`) |
+| **React/Angular controlled inputs** | Use native value setters + synthetic events (already handled in `filler.ts`) |
+| **Already-filled fields** | Skip fields that have existing values; offer override option |
+
+### API Edge Cases
+
+| Scenario | Solution |
+|---|---|
+| AI returns invalid JSON | Wrap in try/catch; retry once with a simplified prompt |
+| AI times out | Set 30s timeout; show partial results if any |
+| Backend is down | Fall back to a local keyword-based matcher (no AI) |
+| Rate limit exceeded | Queue requests; show "please wait" message |
+| Profile is incomplete | Warn user; fill what's available; mark non-fillable fields |
+
+---
+
+## 12. Testing Strategy
+
+### Unit Tests (Vitest)
+
+```
+extension/src/__tests__/
+├── scraper.test.ts           # Test label extraction from various HTML patterns
+├── filler.test.ts            # Test value injection for all field types
+├── storageManager.test.ts    # Test chrome.storage operations (mocked)
+└── messageHandler.test.ts    # Test message routing logic
+
+server/src/__tests__/
+├── aiService.test.ts         # Test prompt construction & response parsing
+├── matchFields.test.ts       # Test the API endpoint
+└── sanitizer.test.ts         # Test input validation
+```
+
+### Integration Tests
+
+| Test | What It Validates |
+|---|---|
+| Extension ↔ Content Script messaging | Messages pass correctly between contexts |
+| Backend ↔ Gemini API | Prompt is sent and parsed correctly |
+| Full autofill flow | Scrape → Match → Fill on a test HTML page |
+
+### E2E Tests (Playwright)
+
+```typescript
+// Full extension test with a mock job portal page
+test('should autofill a sample internship form', async () => {
+  // Load extension in test browser
+  // Navigate to test form page
+  // Click extension popup → "AutoFill"
+  // Assert all fields are filled correctly
+});
+```
+
+### Manual QA Checklist
+
+- [ ] Works on LinkedIn Easy Apply
+- [ ] Works on Internshala application forms
+- [ ] Works on company career portal (e.g., Google Careers, Amazon Jobs)
+- [ ] Works on Google Forms-based applications
+- [ ] Handles Greenhouse.io ATS forms
+- [ ] Handles Lever.co ATS forms
+- [ ] Handles Workday application portals
+
+---
+
+## 13. Deployment & Distribution
+
+### Backend Deployment Options
+
+| Platform | Pros | Good For |
+|---|---|---|
+| **Railway.app** | Free tier, easy Node.js deployment | MVP / testing |
+| **Render** | Free tier, auto-deploy from GitHub | Small-scale production |
+| **Vercel (Edge Functions)** | Serverless, fast | If migrating to serverless |
+| **AWS EC2 / DigitalOcean** | Full control | Production scale |
+| **Google Cloud Run** | Pairs well with Gemini API | Production with Google ecosystem |
+
+### Chrome Web Store Publishing
+
+1. Build production bundle: `pnpm build`
+2. Zip the `dist/` folder
+3. Create a [Chrome Web Store Developer](https://chrome.google.com/webstore/devconsole) account ($5 one-time fee)
+4. Upload the ZIP with:
+   - Screenshots (1280×800 or 640×400)
+   - Promotional images
+   - Detailed description
+   - Privacy policy URL
+5. Submit for review (takes 2–7 days)
+
+### Required Store Listing Assets
+
+| Asset | Size | Notes |
+|---|---|---|
+| Small promo tile | 440×280 | Used in search results |
+| Large promo tile | 920×680 | Featured spot |
+| Marquee promo | 1400×560 | Featured banner |
+| Screenshots | 1280×800 or 640×400 | At least 3 showing key features |
+| Icon | 128×128 | High-res PNG |
+
+---
+
+## Summary: What to Build First (Priority Order)
+
+```mermaid
+gantt
+    title AutoFill AI — Development Timeline
+    dateFormat  YYYY-MM-DD
+    section Phase 1 - Foundation
+    Project scaffolding & Vite setup         :p1, 2026-03-01, 2d
+    Manifest V3 & extension shell            :p2, after p1, 1d
+    Options Page - Profile form UI           :p3, after p2, 4d
+    Chrome storage integration               :p4, after p3, 1d
+    
+    section Phase 2 - Core Engine
+    Content Script - DOM scraper             :p5, after p4, 3d
+    Content Script - Form filler             :p6, after p5, 3d
+    MutationObserver for SPAs                :p7, after p6, 1d
+    
+    section Phase 3 - Backend
+    Express server setup                     :p8, after p4, 1d
+    Gemini AI integration                    :p9, after p8, 2d
+    Match fields endpoint                    :p10, after p9, 2d
+    
+    section Phase 4 - Integration
+    Background script message routing        :p11, after p10, 2d
+    Connect popup → background → content     :p12, after p11, 2d
+    Unmatched fields dialog                  :p13, after p12, 2d
+    
+    section Phase 5 - Polish
+    Error handling & edge cases              :p14, after p13, 3d
+    Testing (unit + E2E)                     :p15, after p14, 3d
+    UI polish & animations                   :p16, after p15, 2d
+    Chrome Web Store submission              :p17, after p16, 1d
+```
+
+> [!TIP]
+> **Estimated total development time**: ~4-5 weeks for a solo developer working part-time. The MVP (Phases 1-4) can be done in ~2-3 weeks.
+
+---
+
+## Quick Start Commands
+
+```bash
+# 1. Clone and install
+git clone <your-repo-url> autofill-ai
+cd autofill-ai
+
+# 2. Install dependencies for both packages
+pnpm install
+
+# 3. Start the extension dev server (with HMR)
+cd extension && pnpm dev
+
+# 4. Start the backend server (in another terminal)
+cd server && pnpm dev
+
+# 5. Load the extension in Chrome
+# → chrome://extensions/ → Developer Mode → Load Unpacked → select extension/dist
+```
+
+---
+
+*Document Version: 1.0.0 | Last Updated: February 28, 2026*

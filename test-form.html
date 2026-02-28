@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sample Job Application Form</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            max-width: 600px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f4f7f6;
+        }
+
+        .container {
+            background: #fff;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+
+        h1 {
+            color: #2c3e50;
+            text-align: center;
+            margin-bottom: 20px;
+        }
+
+        .form-group {
+            margin-bottom: 15px;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+
+        input[type="text"],
+        input[type="email"],
+        input[type="tel"],
+        input[type="url"],
+        select,
+        textarea {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            box-sizing: border-box;
+            font-size: 16px;
+        }
+
+        textarea {
+            height: 100px;
+            resize: vertical;
+        }
+
+        .radio-group,
+        .checkbox-group {
+            display: flex;
+            gap: 15px;
+            align-items: center;
+        }
+
+        .radio-group label,
+        .checkbox-group label {
+            font-weight: normal;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+
+        button {
+            display: block;
+            width: 100%;
+            padding: 12px;
+            background-color: #3498db;
+            color: #fff;
+            border: none;
+            border-radius: 4px;
+            font-size: 18px;
+            cursor: pointer;
+            margin-top: 20px;
+        }
+
+        button:hover {
+            background-color: #2980b9;
+        }
+    </style>
+</head>
+
+<body>
+
+    <div class="container">
+        <h1>Software Engineer Application</h1>
+        <form id="jobForm" onsubmit="event.preventDefault(); alert('Form submitted successfully!');">
+
+            <div class="form-group">
+                <label for="firstName">First Name *</label>
+                <input type="text" id="firstName" name="firstName" required>
+            </div>
+
+            <div class="form-group">
+                <label for="lastName">Last Name *</label>
+                <input type="text" id="lastName" name="lastName" required>
+            </div>
+
+            <div class="form-group">
+                <label for="email">Email Address *</label>
+                <input type="email" id="email" name="email" required>
+            </div>
+
+            <div class="form-group">
+                <label for="phone">Phone Number *</label>
+                <input type="tel" id="phone" name="phone" required>
+            </div>
+
+            <div class="form-group">
+                <label for="linkedin">LinkedIn URL</label>
+                <input type="url" id="linkedin" name="linkedin">
+            </div>
+
+            <div class="form-group">
+                <label for="github">GitHub URL</label>
+                <input type="url" id="github" name="github">
+            </div>
+
+            <div class="form-group">
+                <label for="degree">Highest Degree Earned *</label>
+                <select id="degree" name="degree" required>
+                    <option value="">--Select--</option>
+                    <option value="High School">High School</option>
+                    <option value="Bachelors">Bachelor's Degree</option>
+                    <option value="Masters">Master's Degree</option>
+                    <option value="PhD">Ph.D.</option>
+                </select>
+            </div>
+
+            <div class="form-group">
+                <label for="university">University / College *</label>
+                <input type="text" id="university" name="university" required>
+            </div>
+
+            <div class="form-group">
+                <label for="currentAddress">Current / Present Address</label>
+                <textarea id="currentAddress" name="currentAddress" rows="2"></textarea>
+            </div>
+
+            <div class="form-group">
+                <label for="permanentAddress">Permanent Address</label>
+                <textarea id="permanentAddress" name="permanentAddress" rows="2"></textarea>
+            </div>
+
+            <div class="form-group">
+                <label for="gpa">Cumulative GPA</label>
+                <input type="text" id="gpa" name="gpa">
+            </div>
+
+            <div class="form-group">
+                <label>Are you legally authorized to work in this country? *</label>
+                <div class="radio-group">
+                    <label><input type="radio" name="authorized" value="yes" required> Yes</label>
+                    <label><input type="radio" name="authorized" value="no"> No</label>
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label>Will you now or in the future require sponsorship for employment visa status? *</label>
+                <div class="radio-group">
+                    <label><input type="radio" name="sponsorship" value="yes" required> Yes</label>
+                    <label><input type="radio" name="sponsorship" value="no"> No</label>
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label for="skills">Key Technical Skills (comma separated) *</label>
+                <input type="text" id="skills" name="skills" required>
+            </div>
+
+            <div class="form-group">
+                <label for="why_join">Why do you want to join our company? *</label>
+                <textarea id="why_join" name="why_join" required></textarea>
+            </div>
+
+            <div class="form-group checkbox-group">
+                <label>
+                    <input type="checkbox" id="terms" name="terms" required>
+                    I certify that the information provided is accurate and true. *
+                </label>
+            </div>
+
+            <button type="submit">Submit Application</button>
+        </form>
+    </div>
+
+</body>
+
+</html>
