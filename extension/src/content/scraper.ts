@@ -2,7 +2,7 @@
 // AutoFill AI — Content Script: DOM Field Scraper
 // ============================================================
 
-import { FormField } from '../shared/types';
+import type { FormField } from '../shared/types';
 
 /**
  * Scrape all interactive form fields from the current page DOM.

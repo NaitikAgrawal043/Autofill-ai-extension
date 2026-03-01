@@ -2,8 +2,10 @@
 // AutoFill AI — Background: Storage Manager
 // ============================================================
 
-import { UserProfile, createDefaultProfile } from '../shared/types';
-import { STORAGE_KEYS, ExtensionSettings, DEFAULT_SETTINGS } from '../shared/constants';
+import type { UserProfile } from '../shared/types';
+import { createDefaultProfile } from '../shared/types';
+import { STORAGE_KEYS, DEFAULT_SETTINGS } from '../shared/constants';
+import type { ExtensionSettings } from '../shared/constants';
 
 /**
  * Save user profile to chrome.storage.local.

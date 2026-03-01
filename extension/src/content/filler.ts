@@ -2,7 +2,7 @@
 // AutoFill AI — Content Script: Form Field Filler
 // ============================================================
 
-import { FieldMapping, FillResult } from '../shared/types';
+import type { FieldMapping, FillResult } from '../shared/types';
 
 /**
  * Fill multiple form fields with the provided mappings.
