@@ -2,8 +2,8 @@
 // AutoFill AI — Shared Constants
 // ============================================================
 
-// Backend API URL (set during development)
-export const API_BASE_URL = 'http://localhost:3001/api';
+// Backend API URL (Production via Render)
+export const API_BASE_URL = 'https://autofill-ai-extension.onrender.com/api';
 
 // Storage Keys
 export const STORAGE_KEYS = {
